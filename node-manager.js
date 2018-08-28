@@ -1,62 +1,55 @@
-var allowancePercentage = 0.00001;
+// the purpose of node-manager is to handle hacknet nodes for us
+// the primary reason for doing it at all is simply for netburner augs.
 
 export async function main(ns) {
-    buildNodeLibrary(ns);
-    ns.purchaseHacknetNode();
+    const hn = ns.hacknet;
+    var options = ["level", "ram", "core", "node"];
     while(true) {
-        nodeLibrary.doLoop();
-        await ns.sleep(1000);
-    }
-}
-
-
-var nodeLibrary = null;
-
-function buildNodeLibrary(ns) {
-    nodeLibrary = 
-    {
-        instance: ns,
-        nodes: function() { return this.instance.hacknetnodes },
-        options: ["level", "ram", "core", "node"],
-        getCost: function(option, nodeIndex) {
-            switch(option) {
-                case 0:
-                    return this.nodes()[nodeIndex].getLevelUpgradeCost(1);
-                case 1:
-                    return this.nodes()[nodeIndex].getRamUpgradeCost();
-                case 2:
-                    return this.nodes()[nodeIndex].getCoreUpgradeCost();
-                case 3:
-                    return this.instance.getNextHacknetNodeCost();
-            }
-        },
-        buyThing: function(option, nodeIndex) {
-            switch(option) {
-                case 0:
-                    this.nodes()[nodeIndex].upgradeLevel(1);
-                    break;
-                case 1:
-                    this.nodes()[nodeIndex].upgradeRam();
-                    break;
-                case 2:
-                    this.nodes()[nodeIndex].upgradeCore();
-                    break;
-                case 3:
-                    this.instance.purchaseHacknetNode()
-                    break;
-            }  
-        },
-        playerMoney: function() { return this.instance.getServerMoneyAvailable("home"); },
-        shouldPurchase: function(option, nodeIndex) {
-            return this.playerMoney() * allowancePercentage >= this.getCost(option, nodeIndex);    
-        },
-        doLoop: function() {
-            for (var i = 0; i < this.nodes().length; i++) {
-                for (var o = 0; o < this.options.length; o++) {
-                    if (this.shouldPurchase(o, i))
-                        this.buyThing(o, i);
+        var maxNodes = hn.numNodes();
+        var needsNode = false;
+        if (maxNodes === 0) {
+            needsNode = true;
+            maxNodes = 1;
+        }
+        for (var i = 0; i < maxNodes; i++) {
+            for (var o = (needsNode ? 3 : 0); o < options.length; o++) {
+                var allowancePercentage = 0.00001;
+                var playerMoney = ns.getServerMoneyAvailable("home");
+                var costOfThing = 0;
+                switch(o) {
+                    case 0:
+                        costOfThing = hn.getLevelUpgradeCost(i, 1);
+                        break;
+                    case 1:
+                        costOfThing = hn.getRamUpgradeCost(i, 1);
+                        break;
+                    case 2:
+                        costOfThing = hn.getCoreUpgradeCost(i, 1);
+                        break;
+                    case 3:
+                        costOfThing = hn.getPurchaseNodeCost();
+                        break;
+                }
+                
+                var shouldPurchase = playerMoney * allowancePercentage >= costOfThing;
+                if (shouldPurchase) {
+                    switch(o) {
+                        case 0:
+                            hn.upgradeLevel(i, 1);
+                            break;
+                        case 1:
+                            hn.upgradeRam(i, 1);
+                            break;
+                        case 2:
+                            hn.upgradeCore(i, 1);
+                            break;
+                        case 3:
+                            hn.purchaseNode()
+                            break;
+                    }  
                 }
             }
         }
+        await ns.sleep(10);
     }
 }

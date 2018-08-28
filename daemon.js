@@ -1,3 +1,9 @@
+// the purpose of the daemon is: it's our global starting point.
+// it handles several aspects of the game, primarily hacking for money.
+// since it requires a robust "execute arbitrarily" functionality
+// it serves as the launching point for all the helper scripts we need.
+// this list has been steadily growing as time passes.
+
 /*jshint loopfunc:true */
 
 // --- CONSTANTS ---
@@ -22,16 +28,13 @@ const arbitraryExecutionDelay = 12000;
 const queueDelay = 12000;
 
 // the max number of batches this daemon will spool up to avoid running out of IRL ram
-const maxBatches = 40;
+const maxBatches = 60;
 
 // the max number of targets this daemon will run workers against to avoid running out of IRL ram
 const maxTargets = 5;
 
 // some ancillary scripts that run asynchronously, we utilize the startup/execute capabilities of this daemon to run when able
-const asynchronousHelpers = [
-    {name: "host-manager.ns", shortName: "host", isLaunched: false},
-    {name: "node-manager.ns", shortName: "node", isLaunched: false}
-];
+var asynchronousHelpers = [];
 
 // --- VARS ---
 // in debug mode, the targeting loop will always go for foodnstuff, the saddest little server
@@ -47,9 +50,6 @@ var serverListMoney = [];
 // simple name array of servers that have been added
 var addedServers = [];
 
-// the server object for the current target.
-var currentTarget = null;
-
 // the port cracking array, we use this to do some things
 var portCrackers = [];
 
@@ -58,9 +58,6 @@ var tools = [];
 
 // the name of the host of this daemon, so we don't have to call the function more than once.
 var daemonHost = null;
-
-// literally how much this script costs
-var daemonCost = 0;
 
 // multipliers for player abilities
 var mults = null;
@@ -75,14 +72,29 @@ var bitnodeWeakenMult = null;
 
 // script entry point
 export async function main(ns) {
+    // reset a bunch of stuff, hoping this fixes reset issues.
+    serverListRam = [];
+    serverListMoney = [];
+    addedServers = [];
+    portCrackers = [];
+    tools = [];
+
+    // some ancillary scripts that run asynchronously, we utilize the startup/execute capabilities of this daemon to run when able
+     asynchronousHelpers = [
+        {name: "host-manager.ns", shortName: "host", isLaunched: false},
+        {name: "node-manager.ns", shortName: "node", isLaunched: false},
+        {name: "tor-manager.ns", shortName: "tor", isLaunched: false},
+        {name: "program-manager.ns", shortName: "prog", isLaunched: false},
+        {name: "ram-manager.ns", shortName: "ram", isLaunched: false},
+        {name: "agency-manager.ns", shortName: "agent", isLaunched: false},
+        {name: "aug-manager.ns", shortName: "aug", isLaunched: false}
+    ];
+    
     // get the name of this node
     daemonHost = ns.getHostname();
     
-    // get the cost of the daemon script
-    daemonCost = ns.getScriptRam("daemon.ns", daemonHost);
-    
     // create the exhaustive server list
-    buildServerList(ns);
+    await buildServerList(ns);
     
     // build port cracking array
     buildPortCrackingArray(ns);
@@ -120,6 +132,16 @@ function isAnyServerRunning(scriptName) {
     return false;
 }
 
+function whichServerIsRunning(scriptName) {
+    for (var s = 0; s < serverListRam.length; s++) {
+        var server = serverListRam[s];
+        if (server.hasRunningScript(scriptName)) {
+            return server.name;
+        }
+    }
+    return "";
+}
+
 async function runStartupScripts(ns) {
     var isEverythingAlreadyRunning = false;
     for (var h = 0; h < asynchronousHelpers.length; h++) {
@@ -132,7 +154,10 @@ async function runStartupScripts(ns) {
             continue;
         } else {
             var tool = getTool(helper.shortName);
-            helper.isLaunched = await arbitraryExecution(ns, tool, 1, [])
+            helper.isLaunched = await arbitraryExecution(ns, tool, 1, []);
+            if (helper.isLaunched) {
+                ns.print("Server " + whichServerIsRunning(scriptName) + " running " + scriptName);
+            }
         }
     }
     // if every helper is launched already return "true" so we can skip doing this each cycle going forward.
@@ -147,13 +172,17 @@ async function runStartupScripts(ns) {
 async function doTargetingLoop(ns) {
     var isHelperListLaunched = false;
     while (true) {
+        // sort the array so that already weakened servers have a high priority
+        // while still taking their value into account
+        sortServerList("money");
+        
         // purchase as many servers with 1 TB as affordable, for extra umph.
         // I do this first for no real reason.
         detectChangesInDaemonHosts(ns);
         
         // run some auxilliary processes that ease the ram burden of this daemon
         // and add additional functionality (like managing hacknet or buying servers)
-        if (!isHelperListLaunched) {
+        if (!isHelperListLaunched) {            
             isHelperListLaunched = await runStartupScripts(ns);
         }
         
@@ -171,12 +200,17 @@ async function doTargetingLoop(ns) {
             }    
             // assume perhaps we just succeeded root
             if (currentTargets < maxTargets && server.hasRoot() && server.canHack() && server.shouldHack()) {
+                // now don't do anything to it until prep finishes, because it is in a resting state.
+                if (server.isPrepping())
+                    continue;
+                    
                 // increment the target counter, consider this an optimal target
                 currentTargets++;
                 
                 // if the target is in a resting state (we have scripts running against it), proceed to the next target.
-                if (server.isResting())
+                if (server.isTargeting())
                     continue;
+                    
                 // perform weakening and initial growth until the server is "perfected"
                 await prepServer(ns, server);
                 
@@ -185,7 +219,7 @@ async function doTargetingLoop(ns) {
                     continue;
                 
                 // now don't do anything to it until prep finishes, because it is in a resting state.
-                if (server.isResting())
+                if (server.isPrepping())
                     continue;
                 
                 // adjust the percentage to steal until it's able to rapid fire as many as it can
@@ -194,9 +228,9 @@ async function doTargetingLoop(ns) {
                 // once conditions are optimal, fire barrage after barrage of cycles in a schedule
                 await performScheduling(ns, server);
             }   
-        }           
+        }          
         
-        await ns.sleep(20);
+        await ns.sleep(1000);
     }
 }
 
@@ -223,7 +257,7 @@ function establishMultipliers(ns) {
 }
 
 function buildToolkit(ns) {
-    var toolNames = ["weak-target.ns", "grow-target.ns", "hack-target.ns", "host-manager.ns", "node-manager.ns"];
+    var toolNames = ["weak-target.ns", "grow-target.ns", "hack-target.ns", "host-manager.ns", "node-manager.ns", "tor-manager.ns", "program-manager.ns", "ram-manager.ns", "agency-manager.ns", "aug-manager.ns"];
     for (var i = 0; i < toolNames.length; i++) {
         var tool = {
             instance: ns,
@@ -242,6 +276,16 @@ function buildToolkit(ns) {
                         return "host";
                     case "node-manager.ns":
                         return "node";
+                    case "tor-manager.ns":
+                        return "tor";
+                    case "program-manager.ns":
+                        return "prog";
+                    case "ram-manager.ns":
+                        return "ram";
+                    case "agency-manager.ns":
+                        return "agent";
+                    case "aug-manager.ns":
+                        return "aug";
                 }
             },       
             canRun: function(server) {
@@ -346,7 +390,7 @@ function sortServerList(o) {
             serverListRam.sort(function (a, b) { return b.ramAvailable() - a.ramAvailable(); });
             break;
         case "money":
-            serverListMoney.sort(function (a, b) { return b.maxMoney - a.maxMoney; });
+            serverListMoney.sort(function (a, b) { return b.sortValue() - a.sortValue(); });
             break;
     }
 }
@@ -392,7 +436,7 @@ function getPerformanceSnapshot(currentTarget) {
     return snapshot;
 }
 
-function optimizePerformanceMetrics(ns, currentTarget) {
+async function optimizePerformanceMetrics(ns, currentTarget) {
     var isOptimal = false;
     var hasChanged = false;
     while (!isOptimal) {
@@ -404,9 +448,10 @@ function optimizePerformanceMetrics(ns, currentTarget) {
             hasChanged = true;
             currentTarget.percentageToSteal += adjustment;
         }
+        await ns.sleep(10);
     }
     if (hasChanged) {        
-        ns.tprint("Tuning optimum threading on " + currentTarget.name + ", percentage: " + (Math.floor(currentTarget.actualPercentageToSteal() * 10000) / 100));
+        ns.print("Tuning optimum threading on " + currentTarget.name + ", percentage: " + (Math.floor(currentTarget.actualPercentageToSteal() * 10000) / 100));
     }
 }
 
@@ -434,10 +479,10 @@ async function performScheduling(ns, currentTarget) {
     var now = new Date(Date.now() + queueDelay);        
     var lastBatch = 0;
     
-    ns.tprint("Scheduling " + currentTarget.name + ", batches: " + maxCycles + " - anticipating an estimated " + Math.floor(currentTarget.timeToWeaken() * 2) + " second delay.");
+    ns.print("Scheduling " + currentTarget.name + ", batches: " + maxCycles + " - anticipating an estimated " + Math.floor(currentTarget.timeToWeaken() * 2) + " second delay.");
     while (canSchedule) {        
         var newBatchStart = (scheduledTasks.length === 0) ? now : new Date(lastBatch.getTime() + arbitraryExecutionDelay);
-        lastBatch = new Date(newBatchStart);
+        lastBatch = new Date(newBatchStart.getTime());
         var newBatch = getScheduleTiming(ns, newBatchStart, currentTarget, scheduledTasks.length);      
         if (firstEnding === null) {            
             firstEnding = new Date(newBatch.hackEnd.valueOf());
@@ -454,8 +499,8 @@ async function performScheduling(ns, currentTarget) {
         cyclesScheduled++;
         if (cyclesScheduled >= maxCycles)
             break;
+        await ns.sleep(10);
     }
-
     for (var i = 0; i < scheduledTasks.length; i++) {
         var schedObj = scheduledTasks[i];
         for (var s = 0; s < schedObj.scheduleItems.length; s++) {
@@ -599,7 +644,7 @@ async function arbitraryExecution(ns, tool, threads, args) {
 // brings the server down to minimum security to prepare for cycling scheduler activity
 async function prepServer(ns, currentTarget) {
     // once we're in scheduling mode, presume prep server is to be skipped.
-    if (currentTarget.isResting())
+    if (currentTarget.isTargeting())
         return;    
     var now = new Date(Date.now().valueOf());
     if (currentTarget.security() > currentTarget.minSecurity || currentTarget.money() < currentTarget.maxMoney) {
@@ -628,7 +673,7 @@ async function prepServer(ns, currentTarget) {
         var threadsAllowable = weakenTool.getMaxThreads();        
         var trueThreads = Math.min(threadsAllowable, threadsNeeded);
         if (trueThreads > 0) {
-            ns.tprint("Prepping " + currentTarget.name + ", resting for " + Math.floor(threadSleep / 1000) + " seconds.");
+            ns.print("Prepping " + currentTarget.name + ", resting for " + Math.floor(threadSleep / 1000) + " seconds.");
             await arbitraryExecution(ns, weakenTool, trueThreads, [currentTarget.name, now.getTime(), now.getTime(), 0, "prep"]);            
         }
     }
@@ -643,12 +688,36 @@ function buildServerObject(ns, node) {
         portsRequired: ns.getServerNumPortsRequired(node),
         maxMoney: ns.getServerMaxMoney(node),
         percentageToSteal: 0.5,
+        sortValue: function() { 
+            // if the server is at base security, prioritize it.
+            // we do this by pretending the time to weaken is really really small.
+            var timeToWeakenVar = this.timeToWeaken();
+            if (this.security() > this.minSecurity) {
+                timeToWeakenVar = 1;
+            }
+            return this.maxMoney / (timeToWeakenVar * 2); },
         canCrack: function() { return getPortCrackers(this.instance) >= this.portsRequired },
         canHack: function() { return this.hackingRequired <= this.instance.getHackingLevel(); },
         shouldHack: function () { return this.maxMoney > 0 && this.name !== "home" && !this.instance.getPurchasedServers().includes(this.name); },
         money: function() { return this.instance.getServerMoneyAvailable(this.name); },
         security: function() { return this.instance.getServerSecurityLevel(this.name); },
-        isResting: function() {
+        isPrepping: function() {
+            var toolNames = ["weak-target.ns", "grow-target.ns", "hack-target.ns"];
+            // then figure out if the servers are running the other 2, that means prep
+            for (var s = 0; s < serverListRam.length; s++) {
+                var ps = this.instance.ps(serverListRam[s].name);
+                for (var p = 0; p < ps.length; p++) {
+                    var tps = ps[p];
+                    if (toolNames.includes(tps.filename) && tps.args[0] == this.name) {
+                        if (tps.args.length > 4 && tps.args[4] == "prep") {
+                            return true;
+                        }                        
+                    }
+                }
+            }
+            return false;
+        },
+        isTargeting: function() {
             var toolNames = ["weak-target.ns", "grow-target.ns", "hack-target.ns"];
             // figure out if any server in the network is running scripts against this server
             for (var s = 0; s < serverListRam.length; s++) {
@@ -656,7 +725,9 @@ function buildServerObject(ns, node) {
                 for (var p = 0; p < ps.length; p++) {
                     var tps = ps[p];
                     if (toolNames.includes(tps.filename) && tps.args[0] == this.name) {
-                        return true;
+                        if (tps.args.length > 4 && tps.args[4] != "prep") {
+                            return true;
+                        }     
                     }
                 }
             }
@@ -720,7 +791,6 @@ function buildServerObject(ns, node) {
             return (this.weakenThreadsNeededAfterTheft() + this.weakenThreadsNeededAfterGrowth());
         },
         hasRoot: function() { return this.instance.hasRootAccess(this.name); },
-        shouldHack: function() { return this.maxMoney > 0; },
         isHost: function() { return this.name == daemonHost; },
         getRam: function() { return this.instance.getServerRam(this.name); },
         ramAvailable: function() { 
@@ -790,7 +860,7 @@ function getPortCrackers(ns) {
     return count;
 }
 
-function buildServerList(ns) {
+async function buildServerList(ns) {
     var startingNode = daemonHost;
     
     var hostsToScan = [];
@@ -805,6 +875,7 @@ function buildServerList(ns) {
             }
             addServer(buildServerObject(ns, hostName));
         }
+        await ns.sleep(10);
     }
     
     sortServerList("ram");

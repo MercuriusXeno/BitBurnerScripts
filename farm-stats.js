@@ -1,6 +1,9 @@
+// the purpose of farm-stats is to return a list of our server farm capabilities
+// it just prints a list of purchased servers, their value in money, and the ram they
+// are using vs the total ram available.
+
 const ramCostConstant = 55000;
 
-// the purpose of this script is to return a list of our server farm capabilities
 export async function main(ns) {
     var serverNameList = ns.getPurchasedServers();
     ns.tprint("--==-- Server Farm Stats --==--");
