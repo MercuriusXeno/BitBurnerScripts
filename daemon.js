@@ -242,9 +242,9 @@ function establishMultipliers(ns) {
     var isBitnodeMultsNull = bitnodeMults === null;
     
     // various bitnode mult setters:
-    bitnodeHackingMoneyMult = isBitnodeMultsNull ? 1 : mults.ScriptHackMoney; //applying the multiplier directly to the player mult
-    bitnodeGrowMult = isBitnodeMultsNull ? 1 : mults.ServerGrowthRate;
-    bitnodeWeakenMult = isBitnodeMultsNull ? 1 : mults.ServerWeakenRate;
+    bitnodeHackingMoneyMult = isBitnodeMultsNull ? 1 : bitnodeMults.ScriptHackMoney; //applying the multiplier directly to the player mult
+    bitnodeGrowMult = isBitnodeMultsNull ? 1 : bitnodeMults.ServerGrowthRate;
+    bitnodeWeakenMult = isBitnodeMultsNull ? 1 : bitnodeMults.ServerWeakenRate;
     
     // then do player multipliers:
     mults = ns.getHackingMultipliers();
