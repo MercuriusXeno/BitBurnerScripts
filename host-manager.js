@@ -13,19 +13,36 @@ const maxPurchasedServerRamExponent = 20;
 // the max number of servers you can have in your farm
 const maxPurchasedServers = 25;
 
+// Don't attempt to buy any new servers if we're under this utilization
+const utilizationTarget = 0.95;
+
+// If set to false, we will keep buying better servers and deleting older ones once at max capacity.
+var stopAtMax = true;
+
+// Keep at least this much money on hand (so we arent blocked from buying necessary things)
+const reservedMoney = 250000000;
+
 export async function main(ns) {
-    while(true) {
+    if (ns.args.length > 0 && ns.args[0] == '-f')
+        stopAtMax = false;
+    while (true) {
+        // if we're at capacity, don't buy any more servers
+        //var ownedServers = ns.getPurchasedServers().length;
+        //if (stopAtMax && ownedServers >= maxPurchasedServers) {
+        //    ns.print(ownedServers + ' servers owned. Shutting down...')
+        //    return "";
+        //}
         tryToBuyBestServerPossible(ns);
-        await ns.sleep(200);
+        await ns.sleep(5000);
     }
 }
 
 // buy a mess of servers
 async function buyDaemonHosts(ns) {
-    while(tryToBuyBestServerPossible(ns) !== "") {
+    while (tryToBuyBestServerPossible(ns) !== "") {
         // NOOP
         await ns.sleep(200);
-    } 
+    }
 }
 
 function getMyMoney(ns) {
@@ -34,23 +51,43 @@ function getMyMoney(ns) {
 
 // attempts to buy a server at or better than your home machine.
 function tryToBuyBestServerPossible(ns) {
-    var currentMoney = getMyMoney(ns);    
+    var currentMoney = getMyMoney(ns);
+    
     var exponentLevel = 1;
-    while(Math.pow(2, exponentLevel + 1) * purchasedServerCostPerRam <= currentMoney && exponentLevel < maxPurchasedServerRamExponent) {
+    while (Math.pow(2, exponentLevel + 1) * purchasedServerCostPerRam <= currentMoney && exponentLevel < maxPurchasedServerRamExponent) {
         exponentLevel += 1;
     }
     
     // if the server is crappier than home don't bother.
     var maxRamPossibleToBuy = Math.pow(2, exponentLevel);
-    if (maxRamPossibleToBuy < ns.getServerRam("home")[0] && maxRamPossibleToBuy < Math.pow(2, maxPurchasedServerRamExponent) ) {
-        return "";
+    var homeUtilization = ns.getServerRam("home")
+    
+    // Get a list of purchased servers
+    var existingServers = ns.getPurchasedServers();
+    var ignoredServers = [];
+    
+    // Add 'free' servers we get from hacked nodes
+    var hostsToScan = [];
+    hostsToScan.push("home");
+    while (hostsToScan.length > 0) {
+        var hostName = hostsToScan.pop();
+        if (!existingServers.includes(hostName)) {
+            var connectedHosts = ns.scan(hostName);
+            for (var i = 0; i < connectedHosts.length; i++) {
+                hostsToScan.push(connectedHosts[i]);
+            }
+            // Home tracked and handled separately
+            if (hostName == 'home')
+                continue;
+            // Only include hacked servers with usable RAM
+            if (ns.getServerRam(hostName)[0] >= 0 && ns.hasRootAccess(hostName))
+                existingServers.push(hostName);
+            else
+                ignoredServers.push(hostName);
+        }
     }
     
-    // check to make sure we have room in our server farm.
-    var existingServers = ns.getPurchasedServers();
-      
     // determine ram utilization rates
-    var homeUtilization = ns.getServerRam("home");
     var utilizationTotal = homeUtilization[1];
     var ramMax = homeUtilization[0];
     
@@ -65,7 +102,7 @@ function tryToBuyBestServerPossible(ns) {
     // iterate over the server farm to see if there's any opportunity for improvement
     for (var i = 0; i < existingServers.length; i++) {
         var existingServer = existingServers[i];
-        
+    
         // track the worst server in the farm
         var ramStats = ns.getServerRam(existingServer);
         var existingServerRam = ramStats[0];
@@ -76,40 +113,59 @@ function tryToBuyBestServerPossible(ns) {
             worstServer = existingServer;
             worstServerRam = existingServerRam;
         }
-        
+    
         // if the server is crappier than an existing server don't bother.
         if (maxRamPossibleToBuy < existingServerRam) {
             isWorseThanExistingServer = true;
         }
-    }   
+    }
     
     // analyze the utilization rates
     var utilizationRate = utilizationTotal / ramMax;
-    
-    // hard coded ballpark, if we're over this percentage, consider us "well utilized".
-    var utilizationTarget = 0.5;
+    ns.print('Servers utilization is ' + utilizationTotal.toLocaleString() + ' GB of ' + ramMax.toLocaleString() + ' GB (' + (utilizationRate * 100).toFixed(2) + '%) across ' + existingServers.length + ' rooted servers.')
     
     // abort if utilization is below target. We probably don't need another server.
     if (utilizationRate < utilizationTarget)
         return "";
+    ns.print('hostmanager.js wants to buy another server.')
     
-    // abort if we're trying to buy a sucky box.
-    if (isWorseThanExistingServer)
+    if (stopAtMax && existingServers.length >= maxPurchasedServers) {
+        ns.print('existingServers count (' + existingServers.length + ') is at maximum ' + maxPurchasedServers + ')')
         return "";
+    }
+    // Abort if our home server is bettter/
+    if (maxRamPossibleToBuy < homeUtilization[0] && maxRamPossibleToBuy < Math.pow(2, maxPurchasedServerRamExponent)) {
+        ns.print('maxRamPossibleToBuy (' + maxRamPossibleToBuy.toLocaleString() + ') is less than home ram ' + homeUtilization[0].toLocaleString() + ')')
+        return "";
+    }
+    // Abort if our worst server is better.
+    if (isWorseThanExistingServer) {
+        ns.print('Best server we can buy RAM (' + maxRamPossibleToBuy.toLocaleString() + ') is less than worst existing server RAM (' + worstServer + ": " + worstServerRam.toLocaleString() + ')')
+        return "";
+    }
+    // Abort if we don't have enough money
+    if (currentMoney <= reservedMoney) {
+        ns.print('currentMoney (' + currentMoney.toLocaleString() + ') is less than reserved money (' + reservedMoney.toLocaleString() + ')')
+        return "";
+    }
+    // Abort if it would put us below our reserve
+    var cost = maxRamPossibleToBuy * purchasedServerCostPerRam;
+    if (currentMoney < cost || (currentMoney - cost) < reservedMoney) {
+        ns.print('currentMoney (' + currentMoney.toLocaleString() + ') less cost (' + cost.toLocaleString() + ') is less than reserved money (' + reservedMoney.toLocaleString() + ')')
+        return "";
+    }
     
     // if we're at capacity, check to see if we're better than the worst server, then delete it.
     if (existingServers.length >= maxPurchasedServers) {
         var listOfScripts = ns.ps(worstServer);
         if (listOfScripts.length === 0 && worstServerRam < maxRamPossibleToBuy) {
-            ns.deleteServer(worstServer);
+            ns.print('hostmanager.js wants to delete server ' + worstServer + ' to make room for a better one.')
+            if (stopAtMax)
+                ns.print('Deleting servers is disabled.')
+            else
+                ns.deleteServer(worstServer);
         }
     }
-    
-    var cost = maxRamPossibleToBuy * purchasedServerCostPerRam;
-    
-    // you're too poor lol
-    if (currentMoney < cost)
-        return "";
     
     var purchasedServer = ns.purchaseServer("daemon", maxRamPossibleToBuy);
     
