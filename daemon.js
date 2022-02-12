@@ -81,13 +81,14 @@ export async function main(ns) {
 
     // some ancillary scripts that run asynchronously, we utilize the startup/execute capabilities of this daemon to run when able
      asynchronousHelpers = [
-        {name: "host-manager.ns", shortName: "host", isLaunched: false},
-        {name: "node-manager.ns", shortName: "node", isLaunched: false}//,
-        //{name: "tor-manager.ns", shortName: "tor", isLaunched: false},
-        //{name: "program-manager.ns", shortName: "prog", isLaunched: false},
-        //{name: "ram-manager.ns", shortName: "ram", isLaunched: false},
-        //{name: "agency-manager.ns", shortName: "agent", isLaunched: false},
-        //{name: "aug-manager.ns", shortName: "aug", isLaunched: false}
+        {name: "host-manager.js", shortName: "host", isLaunched: false},
+        {name: "node-manager.js", shortName: "node", isLaunched: false},
+        {name: "tor-manager.js", shortName: "tor", isLaunched: false},
+        {name: "program-manager.js", shortName: "prog", isLaunched: false},
+        // SF 4
+        //{name: "ram-manager.js", shortName: "ram", isLaunched: false},
+        //{name: "agency-manager.js", shortName: "agent", isLaunched: false},
+        //{name: "aug-manager.js", shortName: "aug", isLaunched: false}
     ];
     
     // get the name of this node
@@ -262,7 +263,7 @@ function establishMultipliers(ns) {
 }
 
 function buildToolkit(ns) {
-    var toolNames = ["weak-target.ns", "grow-target.ns", "hack-target.ns", "host-manager.ns", "node-manager.ns", "tor-manager.ns", "program-manager.ns", "ram-manager.ns", "agency-manager.ns", "aug-manager.ns"];
+    var toolNames = ["weak-target.js", "grow-target.js", "hack-target.js", "host-manager.js", "node-manager.js", "tor-manager.js", "program-manager.js", "ram-manager.js", "agency-manager.js", "aug-manager.js"];
     for (var i = 0; i < toolNames.length; i++) {
         var tool = {
             instance: ns,
@@ -271,25 +272,25 @@ function buildToolkit(ns) {
             // I like short names. 
             shortName: function() {
                 switch (this.name) {
-                    case "weak-target.ns":
+                    case "weak-target.js":
                         return "weak";
-                    case "grow-target.ns":
+                    case "grow-target.js":
                         return "grow";
-                    case "hack-target.ns":
+                    case "hack-target.js":
                         return "hack";
-                    case "host-manager.ns":
+                    case "host-manager.js":
                         return "host";
-                    case "node-manager.ns":
+                    case "node-manager.js":
                         return "node";
-                    case "tor-manager.ns":
+                    case "tor-manager.js":
                         return "tor";
-                    case "program-manager.ns":
+                    case "program-manager.js":
                         return "prog";
-                    case "ram-manager.ns":
+                    case "ram-manager.js":
                         return "ram";
-                    case "agency-manager.ns":
+                    case "agency-manager.js":
                         return "agent";
-                    case "aug-manager.ns":
+                    case "aug-manager.js":
                         return "aug";
                 }
             },       
@@ -737,7 +738,7 @@ function buildServerObject(ns, node) {
         money: function() { return this.instance.getServerMoneyAvailable(this.name); },
         security: function() { return this.instance.getServerSecurityLevel(this.name); },
         isPrepping: function() {
-            var toolNames = ["weak-target.ns", "grow-target.ns", "hack-target.ns"];
+            var toolNames = ["weak-target.js", "grow-target.js", "hack-target.js"];
             // then figure out if the servers are running the other 2, that means prep
             for (var s = 0; s < serverListRam.length; s++) {
                 var ps = this.instance.ps(serverListRam[s].name);
@@ -753,7 +754,7 @@ function buildServerObject(ns, node) {
             return false;
         },
         isTargeting: function() {
-            var toolNames = ["weak-target.ns", "grow-target.ns", "hack-target.ns"];
+            var toolNames = ["weak-target.js", "grow-target.js", "hack-target.js"];
             // figure out if any server in the network is running scripts against this server
             for (var s = 0; s < serverListRam.length; s++) {
                 var ps = this.instance.ps(serverListRam[s].name);
